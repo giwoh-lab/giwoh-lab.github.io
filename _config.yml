@@ -14,7 +14,7 @@ timezone:
 # jekyll-seo-tag settings › https://github.com/jekyll/jekyll-seo-tag/blob/master/docs/usage.md
 # ↓ --------------------------
 
-title: giwoh's blogs # the main title
+title: Giwoh's blogs # the main title
 
 tagline: I will post some CTF writeups in here :P # it will display as the subtitle
 
@@ -98,7 +98,7 @@ theme_mode: # [light | dark]
 cdn:
 
 # the avatar on sidebar, support local or CORS resources
-avatar:
+avatar: https://pbs.twimg.com/profile_images/1996174140697632768/FJ-dW9qW_400x400.jpg
 
 # The URL of the site-wide social preview image used in SEO `og:image` meta tag.
 # It can be overridden by a customized `page.image` in front matter.
