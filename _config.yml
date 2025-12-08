@@ -14,35 +14,35 @@ timezone:
 # jekyll-seo-tag settings › https://github.com/jekyll/jekyll-seo-tag/blob/master/docs/usage.md
 # ↓ --------------------------
 
-title: Chirpy # the main title
+title: giwoh's blogs # the main title
 
-tagline: A text-focused Jekyll theme # it will display as the subtitle
+tagline: I will post some CTF writeups in here :P # it will display as the subtitle
 
 description: >- # used by seo meta and the atom feed
-  A minimal, responsive and feature-rich Jekyll theme for technical writing.
+  Hi, I'm Fried (aka Vivisect0r). I am an Information Security student at UIT. This blog serves as my digital notebook where I publish CTF writeups, dissect web vulnerabilities, and document my journey into offensive security. I believe the best way to learn is to break things—and then explain how I did it.
 
 # Fill in the protocol & hostname for your site.
 # E.g. 'https://username.github.io', note that it does not end with a '/'.
 url: "https://giwoh-lab.github.io"
 
 github:
-  username: github_username # change to your GitHub username
+  username: giwoh-lab # change to your GitHub username
 
 twitter:
-  username: twitter_username # change to your Twitter username
+  username: giowh07 # change to your Twitter username
 
 social:
   # Change to your full name.
   # It will be displayed as the default author of the posts and the copyright owner in the Footer
-  name: your_full_name
-  email: example@domain.com # change to your email address
+  name: Hoang Tran Duy Huy
+  email: huyhoang170727@gmail.com # change to your email address
   links:
     # The first element serves as the copyright owner's link
-    - https://twitter.com/username # change to your Twitter homepage
-    - https://github.com/username # change to your GitHub homepage
+    - https://x.com/giwoh07 # change to your Twitter homepage
+    - https://github.com/giwoh-lab # change to your GitHub homepage
     # Uncomment below to add more social links
-    # - https://www.facebook.com/username
-    # - https://www.linkedin.com/in/username
+    # - https://web.facebook.com/nguoivietg0cc4y/
+    # - https://www.linkedin.com/in/hoang-tran-247580386/
 
 # Site Verification Settings
 webmaster_verifications:
