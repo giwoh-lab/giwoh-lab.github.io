@@ -9,6 +9,7 @@ math: true
 ## Challenge Summary
 
 We are provided with a `.zip` source code file and a URL to access the **NEON CASINO** web application.
+[Download Source Code (gamblecore.zip)](/assets/files/gamblecore.zip)
 
 * **Starting Balance:** 10 Microcoins (which equals $0.00001$ Coins).
 * **Goal:** We need to acquire **$10 USD** to purchase the flag from the "Black Market".
