@@ -4,7 +4,7 @@ date: 2025-12-09 12:00:00 +0700
 categories: [Introduction]
 tags: [personal, anime, philosophy]
 image:
-  path: /assets/img/kaori-violin.jpg
+  path: /assets/img/introduction/Kousei_and_Kaori~Shigatsu_wa_Kimi_no_Uso.jpeg
   alt: Kaori Miyazono playing the violin
 ---
 
@@ -25,14 +25,14 @@ You might be wondering about the imagery on this blog.
 
 When I'm not staring at a terminal or debugging Python scripts, my escape is anime. My absolute favorite is **Your Lie in April** (*Shigatsu wa Kimi no Uso*).
 
-![Kaori playing the violin](/assets/img/kaori-violin.jpg)
+![Kaori playing the violin](/assets/img/introduction/kaori-violin.jpg)
 _The vibrant world of Your Lie in April._
 
 Cybersecurity can feel very technical and binary—zeros and ones, success or failure. But like music, true mastery requires creativity, intuition, and an almost obsessive level of practice.
 
 **Kousei Arima’s** journey to face his trauma and play the piano again resonates with me. Learning security is frustrating. You hit walls constantly. You feel like you aren't good enough.
 
-![Kousei at the piano](/assets/img/kousei-kaori.jpg)
+![Kousei at the piano](/assets/img/introduction/kousei-kaori.jpg)
 _The discipline required to master a craft._
 
 This anime reminds me that dedication pays off, and that even technical skills can be performed with art and passion.
