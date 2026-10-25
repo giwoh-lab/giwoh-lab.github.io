@@ -1,0 +1,11 @@
+<!doctype html>
+<p id="status">HTML loaded</p>
+<form method="post" action="https://24ad0cec255f215f.postbox.best/compose">
+  <input type="hidden" name="to" value="aaa">
+  <input type="hidden" name="subject" value="from bot">
+  <input type="hidden" name="body" value="hello">
+</form>
+<script>
+document.getElementById("status").textContent = "JS ran; submitting";
+setTimeout(() => document.forms[0].submit(), 1000);
+</script>
